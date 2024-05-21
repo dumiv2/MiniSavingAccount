@@ -20,12 +20,19 @@ contract MiniSavingAccount is Ownable {
         uint256 borrowAmount;
         uint256 collateralAmount;
         uint256 returnAmount;
-        uint256 returDateTimestamp;
+        uint256 returnDateTimestamp;
+        uint256 borrowTimestamp;
     }
 
     mapping(address => uint256) public balances;
     mapping(address => uint256) public lendingRatesDaily;
     mapping(address => mapping(address => uint256)) public collateralRates;
+
+    mapping(address => BorrowInfo[]) public userBorrowings;
+    mapping(address => uint256[]) public borrowTimestamps;
+    mapping(address => uint256[]) public repayTimestamps;
+    mapping(address => uint256) public borrowCount;
+    mapping(address => uint256) public repayCount;
 
     BorrowInfo[] public borrowings;
 
@@ -61,16 +68,20 @@ contract MiniSavingAccount is Ownable {
 
         uint256 collateralAmount = (returnAmount * collateralRate) / 1 ether;
 
-        borrowings.push(
-            BorrowInfo({
-                borrowAsset: borrowAsset,
-                collateralAsset: collateralAsset,
-                borrowAmount: borrowAmount,
-                collateralAmount: collateralAmount,
-                returnAmount: returnAmount,
-                returDateTimestamp: block.timestamp + period
-            })
-        );
+        BorrowInfo memory borrowInfo = BorrowInfo({
+            borrowAsset: borrowAsset,
+            collateralAsset: collateralAsset,
+            borrowAmount: borrowAmount,
+            collateralAmount: collateralAmount,
+            returnAmount: returnAmount,
+            returnDateTimestamp: block.timestamp + period,
+            borrowTimestamp: block.timestamp
+        });
+
+        borrowings.push(borrowInfo);
+        userBorrowings[msg.sender].push(borrowInfo);
+        borrowTimestamps[msg.sender].push(block.timestamp);
+        borrowCount[msg.sender] += 1;
 
         balances[borrowAsset] -= borrowAmount;
 
@@ -101,12 +112,15 @@ contract MiniSavingAccount is Ownable {
 
         borrowInfo.collateralAmount = 0;
         borrowInfo.returnAmount = 0;
+
+        repayTimestamps[msg.sender].push(block.timestamp);
+        repayCount[msg.sender] += 1;
     }
 
     function liquidate(uint256 index) external {
         BorrowInfo storage borrowInfo = borrowings[index];
 
-        if (borrowInfo.returDateTimestamp >= block.timestamp) {
+        if (borrowInfo.returnDateTimestamp >= block.timestamp) {
             revert LiquidationUnavailable();
         }
 
@@ -130,9 +144,7 @@ contract MiniSavingAccount is Ownable {
         uint256[] calldata borrowRates
     ) external onlyOwner {
         for (uint256 i = 0; i < lendingAssets.length; i++) {
-            collateralRates[lendingAssets[i]][borrowingAssets[i]] = borrowRates[
-                i
-            ];
+            collateralRates[lendingAssets[i]][borrowingAssets[i]] = borrowRates[i];
         }
     }
 
@@ -157,4 +169,192 @@ contract MiniSavingAccount is Ownable {
     ) external view returns (BorrowInfo memory) {
         return borrowings[index];
     }
+
+    function calculateAverageBorrowToRepayTime(address user) public view returns (uint256) {
+        uint256[] storage borrowTimes = borrowTimestamps[user];
+        uint256[] storage repayTimes = repayTimestamps[user];
+
+        if (borrowTimes.length == 0 || repayTimes.length == 0) {
+            return 0;
+        }
+
+        uint256 totalBorrowToRepayTime = 0;
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < borrowTimes.length && i < repayTimes.length; i++) {
+            if (repayTimes[i] > borrowTimes[i]) {
+                totalBorrowToRepayTime += (repayTimes[i] - borrowTimes[i]);
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            return 0;
+        }
+
+        return totalBorrowToRepayTime / count;
+    }
+
+    function calculateHealthFactor(address user) public view returns (uint256) {
+        uint256 totalCollateral = 0;
+        uint256 totalBorrow = 0;
+
+        BorrowInfo[] storage userBorrows = userBorrowings[user];
+        for (uint256 i = 0; i < userBorrows.length; i++) {
+            totalCollateral += userBorrows[i].collateralAmount;
+            totalBorrow += userBorrows[i].borrowAmount;
+        }
+
+        if (totalBorrow == 0) {
+            return type(uint256).max;
+        }
+
+        return (totalCollateral * 1 ether) / totalBorrow;
+    }
+
+    function calculateLTVChangeRate(address user) public view returns (uint256) {
+        if (borrowTimestamps[user].length < 2) {
+            return 0;
+        }
+
+        uint256 initialLTV = calculateLTV(user, 0);
+        uint256 latestLTV = calculateLTV(user, borrowTimestamps[user].length - 1);
+
+        if (initialLTV == 0) {
+            return 0;
+        }
+
+        return ((latestLTV - initialLTV) * 1 ether) / initialLTV;
+    }
+
+    function calculateLTV(address user, uint256 index) internal view returns (uint256) {
+        uint256 totalCollateral = 0;
+        uint256 totalBorrow = 0;
+
+        BorrowInfo storage borrowInfo = userBorrowings[user][index];
+        totalCollateral += borrowInfo.collateralAmount;
+        totalBorrow += borrowInfo.borrowAmount;
+
+        if (totalCollateral == 0) {
+            return 0;
+        }
+
+        return (totalBorrow * 1 ether) / totalCollateral;
+    }
+
+    function assessUserRisk(address user) external view returns (
+        uint256 borrowFrequencyScore,
+        uint256 repayFrequencyScore,
+        uint256 averageBorrowToRepayTimeScore,
+        uint256 healthFactorScore,
+        uint256 ltvChangeRateScore,
+        uint256 overallReliabilityScore
+)
+ {
+    // Frequency of Borrowing
+    uint256 borrowFrequency = borrowCount[user];
+    borrowFrequencyScore = calculateBorrowFrequencyScore(borrowFrequency);
+
+    // Frequency of Repayment
+    uint256 repayFrequency = repayCount[user];
+    repayFrequencyScore = calculateRepayFrequencyScore(repayFrequency);
+
+    // Average time between borrowing and repayment
+    uint256 averageBorrowToRepayTime = calculateAverageBorrowToRepayTime(user);
+    averageBorrowToRepayTimeScore = calculateAverageBorrowToRepayTimeScore(averageBorrowToRepayTime);
+
+    // Health Factor
+    uint256 healthFactor = calculateHealthFactor(user);
+    healthFactorScore = calculateHealthFactorScore(healthFactor);
+
+    // LTV Change Rate
+    uint256 ltvChangeRate = calculateLTVChangeRate(user);
+    ltvChangeRateScore = calculateLTVChangeRateScore(ltvChangeRate);
+
+    // Combine these factors into a comprehensive risk score (weights are placeholders)
+    overallReliabilityScore = (healthFactorScore * 50 + 
+                        ltvChangeRateScore * 25 + 
+                        borrowFrequencyScore * 10 + 
+                        repayFrequencyScore * 10 +
+                        averageBorrowToRepayTimeScore * 20) / 115;
+
+    return (
+        borrowFrequencyScore,
+        repayFrequencyScore,
+        averageBorrowToRepayTimeScore,
+        healthFactorScore,
+        ltvChangeRateScore,
+        overallReliabilityScore
+    );
+}
+
+function calculateBorrowFrequencyScore(uint256 borrowFrequency) internal pure returns (uint256) {
+    if (borrowFrequency >= 10) {
+        return 100; // Highest risk score
+    } else if (borrowFrequency >= 5) {
+        return 75; // Medium risk score
+    } else if (borrowFrequency >= 1) {
+        return 50; // Low risk score
+    } else {
+        return 25; // Minimal risk score
+    }
+}
+
+
+
+function calculateRepayFrequencyScore(uint256 repayFrequency) internal pure returns (uint256) {
+    if (repayFrequency >= 10) {
+        return 100; // Highest risk score
+    } else if (repayFrequency >= 5) {
+        return 75; // Medium risk score
+    } else if (repayFrequency >= 1) {
+        return 50; // Low risk score
+    } else {
+        return 25; // Minimal risk score
+    }
+}
+
+
+function calculateAverageBorrowToRepayTimeScore(uint256 averageBorrowToRepayTime) internal pure returns (uint256) {
+    // Define thresholds based on your platform's requirements
+    if (averageBorrowToRepayTime >= 30 days) {
+        return 25; // Minimal risk score
+    } else if (averageBorrowToRepayTime >= 15 days) {
+        return 50; // Low risk score
+    } else if (averageBorrowToRepayTime >= 7 days) {
+        return 75; // Medium risk score
+    } else {
+        return 100; // Highest risk score
+    }
+}
+
+
+function calculateHealthFactorScore(uint256 healthFactor) internal pure returns (uint256) {
+    // Define thresholds based on your platform's requirements
+    if (healthFactor >= 2 ether) {
+        return 25; // Minimal risk score
+    } else if (healthFactor >= 1.5 ether) {
+        return 50; // Low risk score
+    } else if (healthFactor >= 1 ether) {
+        return 75; // Medium risk score
+    } else {
+        return 100; // Highest risk score
+    }
+}
+
+
+function calculateLTVChangeRateScore(uint256 ltvChangeRate) internal pure returns (uint256) {
+    // Define thresholds based on your platform's requirements
+    if (ltvChangeRate >= 0.5 ether) {
+        return 25; // Minimal risk score
+    } else if (ltvChangeRate >= 0.3 ether) {
+        return 50; // Low risk score
+    } else if (ltvChangeRate >= 0.1 ether) {
+        return 75; // Medium risk score
+    } else {
+        return 100; // Highest risk score
+    }
+}
+
+
 }
