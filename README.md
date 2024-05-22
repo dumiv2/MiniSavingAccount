@@ -59,12 +59,10 @@ forge build
 forge test
 ```
 
-4. Change the `env.example` to `env`
+4. Configure .env file by following .env.example
 
 5. Deploy smart contract:
 ```bash
 chmod +x ./script/deploy.sh
 ./script/deploy.sh
 ```
-
-Background for new function: [Resolving Loop of Debt](https://github/dumiv2/MiniSavingAccount/src/splitwise/README.md)
