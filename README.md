@@ -67,4 +67,4 @@ chmod +x ./script/deploy.sh
 ./script/deploy.sh
 ```
 
-Background for new function: [Resolving Loop of Debt](https://github/dumiv2/MiniSavingAccount/src/splitwise/README.md)
+Background for new function: [Resolving Loop of Debt](https://github/dumiv2/MiniSavingAccount/src/Splitwise/README.md)
