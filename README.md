@@ -67,4 +67,35 @@ chmod +x ./script/deploy.sh
 ./script/deploy.sh
 ```
 
+## Smart Contract
+
+- ERC20.sol: Manage AToken generation and burning based on user deposits and withdrawals from the lending pool. 
+
+- MyToken.sol: Generates our own currency which has symbol IBT which we are minting to users account and is used for transactions as a second cryptocurrency (testing)
+
+
+## List of Database and Technology used: 
+
+- Databases: Data is retrieved directly from the smart contracts deployed on the blockchain 
+
+- Technology Stack: 
+
++ Solidity: Used to write the smart contract that define the logic and functionalities of the lending and borrowing protocol 
+
++ Hardhats: Utilized for project configuration, testing and deployment of the smart contracts
+
++ Polygon Amoy Testnet: Chosen as the test network for deploying and testing the smart contracts, providing a scalable and low-cost environment for development and experimentation. 
+
+
+## Strucuture of blockchain: 
+
+- POS Consensus: Polygon utilizes a Proof of Stake (PoS) consesus mechanism where validators stake tokens as collateral to validate transactions and secure the network. 
+
+- Validators and Staking: Validators propose and validate books, while users can stake tokens as delegaots to support validators and earn rewards
+
+- Finality: PoS provides faster and more predictable finality for transactions compared to Ethereum's PoW, enhancing transaction efficiency. 
+
+- Scalability and Efficiency: PoS contributes to Polygon's scalability and efficiency by reducing energy consumption and enabling faster block confirmation times. 
+
+
 Background for new function: [Resolving Loop of Debt](https://github.com/dumiv2/MiniSavingAccount/tree/main/src/Splitwise)
